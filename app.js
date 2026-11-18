@@ -1167,6 +1167,7 @@ function row(field,displayName='',compact=false){
    syncDropdownOptions();
    refreshSideDrop();
    refreshLocks();
+   refreshJambDepthFields();
    refreshDesignHints();
    updateFinishPreviews();
    refreshMirrorWeightHint();
@@ -1175,6 +1176,7 @@ function row(field,displayName='',compact=false){
     if(['D13','D17','D31','D16','D84','D23'].includes(field.cell))refreshMRLShaftMinimum();
    }
    if(['K13_Operation','K5_Capacity','K8_Speed'].includes(field.name))renderFeatures();
+   if(field.name==='K13_Operation')refreshGroupControlPreview();
    if($('model').value==='MRL'&&field.cell==='D14'){syncObservationButton(input);if(/^NY-40/i.test(String(input.value||'')))openNy40Popup(input.value);}
    if($('model').value==='MRL'&&['D36','D37'].includes(field.cell))refreshMRLOverheadMinimum(false);
    invalidateCheck();status('Đã thay đổi thông số. Cần chạy lại Check Spec.');
@@ -1493,6 +1495,82 @@ function refreshCarDesignStates(){
   }
  }
 }
+// v5.8.92 — conditional JD (Jamb depth) for G11L1P, independent for main/other floors.
+function mountJambDepthFields(){
+ if(!['MR','MRL'].includes($('model').value)||!window.SPEC_JAMB_DEPTH)return;
+ for(const config of window.SPEC_JAMB_DEPTH.floorsForModel($('model').value)){
+  const jamb=activeInput(config.cell),host=jamb?.closest('.field');
+  if(!host||host.querySelector('.jamb-jd-field'))continue;
+  const block=document.createElement('div');block.className='jamb-jd-field';block.dataset.jdKey=config.key;
+  const label=document.createElement('label');label.className='nm jamb-jd-label';label.textContent='JD (mm) – Chiều rộng khung bao bản rộng / Jamb depth';
+  const select=document.createElement('select');select.id='spec-'+config.key;
+  select.dataset.cell=config.key;select.className='jamb-jd-input';label.htmlFor=select.id;
+  select.addEventListener('change',()=>{
+   changes[config.key]=select.value;select.classList.add('dirty');
+   invalidateCheck();status('Đã thay đổi chiều rộng khung bao (JD). Cần kiểm tra lại Check Spec.');
+  });
+  const help=document.createElement('small');help.className='jamb-jd-range';
+  block.append(label,select,help);host.append(block);
+ }
+ refreshJambDepthFields();
+}
+function refreshJambDepthFields(){
+ if(!['MR','MRL'].includes($('model').value)||!window.SPEC_JAMB_DEPTH)return;
+ for(const config of window.SPEC_JAMB_DEPTH.floorsForModel($('model').value)){
+  const block=document.querySelector('.jamb-jd-field[data-jd-key="'+config.key+'"]');
+  if(!block)continue;
+  const selectedType=window.SPEC_JAMB_DEPTH.jambType(currentValue(config.cell));
+  const range=window.SPEC_JAMB_DEPTH.limits(selectedType);
+  block.hidden=!range;
+  if(!range)continue;
+  const select=block.querySelector('select');
+  const prev=String(changes[config.key]??'');
+  // Populate every integer in the published inclusive range, without assuming a 5/10 mm step.
+  if(select.dataset.min!==String(range.min)){
+   select.replaceChildren();
+   const blank=document.createElement('option');blank.value='';blank.textContent='— Chọn JD (mm) / Select —';select.append(blank);
+   for(let value=range.min;value<=range.max;value++){
+    const option=document.createElement('option');option.value=String(value);option.textContent=value+' mm';select.append(option);
+   }
+   select.dataset.min=String(range.min);
+  }
+  select.value=(/^\d+$/.test(prev)&&Number(prev)>=range.min&&Number(prev)<=range.max)?prev:'';
+  block.querySelector('.jamb-jd-range').textContent=selectedType+': '+range.min+' ≤ JD ≤ '+range.max+' mm';
+ }
+}
+
+// Preview is presentation-only and is anchored to the K13_Operation field for
+// EACH model (MR=D21, MRL=D22). It disappears five seconds after a selection.
+let groupControlPreviewTimer=null;
+function clearGroupControlPreview(){
+ if(groupControlPreviewTimer!==null){clearTimeout(groupControlPreviewTimer);groupControlPreviewTimer=null;}
+ document.querySelectorAll('.group-control-preview').forEach(panel=>panel.remove());
+ document.querySelectorAll('.group-preview-inline').forEach(host=>host.classList.remove('group-preview-inline'));
+}
+function refreshGroupControlPreview(){
+ // Cancel the previous model/selection preview even when a new one is hidden.
+ clearGroupControlPreview();
+ const model=$('model')?.value;
+ if(!['MR','MRL'].includes(model))return;
+ const field=current?.fields?.find(f=>f.name==='K13_Operation');
+ if(!field)return;
+ const input=activeInput(field.cell),host=input?.closest('.field');
+ if(!host)return;
+ const value=String(currentValue(field.cell)||'').trim();
+ if(!value||value==='1C-2BC')return;
+ const panel=document.createElement('div');panel.className='group-control-preview';
+ const img=document.createElement('img');img.className='group-control-preview-thumb';
+ img.loading='eager';img.decoding='async';img.alt='At bottom floor — group control arrangement';
+ img.src='assets/group-control-non-1c-2bc.png';
+ const note=document.createElement('small');note.className='group-control-preview-note';
+ note.textContent='Hình minh họa bố trí thang nhóm / Group control arrangement preview';
+ panel.append(img,note);host.append(panel);host.classList.add('group-preview-inline');
+ // Auto-dismiss without changing the selected group control or Check Spec state.
+ groupControlPreviewTimer=setTimeout(()=>{
+  panel.remove();host.classList.remove('group-preview-inline');
+  groupControlPreviewTimer=null;
+ },5000);
+}
 function renderAllSpecRows(){
  const rows=current.layout||layouts[$('model').value]||[];
  const byRow=new Map();for(const f of current.fields){const n=split(f.cell)[1];if(!byRow.has(n))byRow.set(n,[]);byRow.get(n).push(f)}
@@ -1559,6 +1637,14 @@ function renderAllSpecRows(){
      original.classList.add('dimension-entry');
      const label=original.querySelector('.spec-row-title');
      if(label)label.textContent=group.labels[i];
+     // MR only: fixed maintenance headroom note beside MH (source row 38).
+     // Informational display; do not bind it to SpecForm, Check Spec, or Export.
+     if(model==='MR'&&sourceRow===38){
+      const note=document.createElement('small');
+      note.className='mr-mh-maintenance-note';
+      note.textContent='Chiều cao bảo trì tối thiểu 1770 mm – Sử dụng thép tấm thay thế Underbeam H125';
+      original.append(note);
+     }
      card.append(original);
     });
     grouped.append(card);
@@ -1632,6 +1718,7 @@ function renderAllSpecRows(){
    landingRows.insertBefore(panel,fireRow||null);
   }
  }
+ mountJambDepthFields();
  // Build a compact section navigator without changing any workbook inputs or source-cell bindings.
  const nav=$('spec-nav');if(nav){nav.replaceChildren();
   const headings=[...root.querySelectorAll('.spec-section')];
@@ -1752,7 +1839,7 @@ function refreshLeadTime(){
 // delegated controls and model/database reloads. No export pipeline changes.
 document.addEventListener('change',()=>queueMicrotask(refreshLeadTime));
 
-function load(){featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
+function load(){clearGroupControlPreview();featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshGroupControlPreview();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
 
 function issueDetails(raw){
  const m=/^([A-Z]{1,3}\d+):\s*(.*)$/.exec(raw);
@@ -1891,6 +1978,10 @@ function check(){
   }
   if(result.errors.length)result.status='FAIL';
  }
+ if(['MR','MRL'].includes(model)&&window.SPEC_JAMB_DEPTH){
+  const jdErrors=window.SPEC_JAMB_DEPTH.validate(model,currentValue);
+  if(jdErrors.length){result.errors.push(...jdErrors);result.status='FAIL';}
+ }
  if(window.SPEC_MIRROR_RULES && model==='MR'){
   const mr=true,val=currentValue('D69'),check=window.SPEC_MIRROR_RULES.validate(model,currentValue('D13'),currentValue('D29'),val,currentValue('D31'));
   if(!check.ok){result.errors.push({id:'Mirror!Eligibility',cell:mr?'D69':'D66',message:check.message});result.status='FAIL';}
@@ -1953,12 +2044,13 @@ function renderSourceCheck(result){
   const f=current.fields.find(x=>x.cell===cell),feature=features.find(x=>x.cell===cell);
   let name=vietnameseFieldName(xrules().labels?.[cell]||f?.label||feature?.vi||feature?.code||'Thông số kỹ thuật');
   if(isDimension(cell))name=($('model').value==='MR'&&cell==='D34'?'Chiều rộng hố thang (AH)':sizeLabel[cell])||name;
+  if(String(err.id).startsWith('JD!'))name='Chiều rộng khung bao bản rộng (JD) — '+(cell==='JD_MAIN'?'Tầng chính':'Tầng khác');
   if(String(err.id)==='ITP!Required')name='Vui lòng chọn loại ITP';
   if(String(err.id).startsWith('ITP!')&&String(err.id)!=='ITP!Required')name=String(err.message||'Loại ITP không hợp lệ');
   if(!name||name===cell)name='Thông số kỹ thuật';
   // NSCR-C/C760: explain required EVRC choice, instead of merely showing an
   // unlabeled failed NSCR-C row. Clicking the error opens Operation at EVRC-C.
-  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
+  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
   const priority=isDimension(cell)?dimensionPriority(err):0;
   const old=fields.get(cell);
   if(!old||priority>old.priority)fields.set(cell,{name,message,priority});

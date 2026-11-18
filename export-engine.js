@@ -71,6 +71,16 @@
    if(!db?.sheets?.SpecFormExport||!db?.tables)throw Error('Thiếu SpecFormExport hoặc DataTable / Workbook source missing');
    currentResult(model,changes,db);
    const eng=new window.SpecExcelSourceEngine.SourceEngine(db,changes);
+   // JD is a Webtool-only supplemental field, not an Excel DataTable formula.
+   // Validate it before any export is built, even when exportModel is invoked directly.
+   if(['MR','MRL'].includes(model)&&window.SPEC_JAMB_DEPTH){
+     const jdErrors=window.SPEC_JAMB_DEPTH.validate(model,key=>{
+       if(key==='JD_MAIN'||key==='JD_OTHER')return changes[key];
+       return eng.safe('SpecForm',key).value;
+     });
+     if(jdErrors.length)throw Error(jdErrors.map(e=>e.message).join(' | '));
+   }
+
    const cells={},hiddenRows=new Set(),overrides={},sections={},unresolved=[];
    const output=db.sheets.SpecFormExport;
    for(const [addr,entry] of Object.entries(output)){
@@ -342,6 +352,16 @@
        cells['C'+rn]=body(cells['C'+rn],cells['C'+following]);
        cells['A'+rn]=heading;cells['B'+rn]=floor;
        hiddenRows.add(following);
+     }
+     // Append JD in both languages to the selected wide jamb, independently by floor.
+     // E-102 must not show a JD value or a JD text line.
+     if(window.SPEC_JAMB_DEPTH){
+       for(const floor of window.SPEC_JAMB_DEPTH.floorsForModel(model)){
+         const jamb=window.SPEC_JAMB_DEPTH.jambType(eng.safe('SpecForm',floor.cell).value);
+         if(!window.SPEC_JAMB_DEPTH.limits(jamb))continue;
+         const jd=String(changes[floor.key]);
+         cells['C'+floor.exportRow]=text(cells['C'+floor.exportRow]).trimEnd()+'\n'+window.SPEC_JAMB_DEPTH.description(jd);
+       }
      }
      // Three independent floor groups. Combine PIV, HBV, PIH and optional
      // Hall Lantern per floor only once; keep every selected device description.

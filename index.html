@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="specweb-build" content="5.8.85-mobile-compact">
+<meta name="specweb-build" content="5.8.94-mr-mh-note">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spec Engineering | Mitsubishi Electric</title>
 <!-- Browser icon / Home screen icon -->
@@ -53,6 +53,12 @@ input[type="file"]{height:auto;background:white;border-color:#d6dde5;cursor:poin
 .obs-inline{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 .obs-preview-btn{white-space:nowrap;background:#fff;color:#245b8f;border-color:#bdd2e7}
 .obs-preview-btn:disabled{opacity:.55}
+
+.group-control-preview{margin-top:8px;padding:8px;border:1px solid #d7e0eb;border-radius:8px;background:#fff;max-width:380px;box-sizing:border-box}
+.group-control-preview-thumb{display:block;max-width:100%;width:auto;max-height:320px;height:auto;margin:0 auto;object-fit:contain}
+.group-control-preview-note{display:block;margin-top:6px;color:#5b6c7c;font-size:11px;line-height:1.35;text-align:center}
+.group-preview-inline{align-items:stretch}
+
 #ny40-popup{position:fixed;inset:0;z-index:70;background:rgba(10,26,45,.55);display:none;align-items:center;justify-content:center;padding:16px}
 #ny40-popup.show{display:flex}
 .ny40-dialog{width:min(760px,100%);max-height:94vh;overflow:auto;background:#fff;border:1px solid #dbe6ef;border-radius:12px;box-shadow:0 22px 70px rgba(16,35,58,.28)}
@@ -129,6 +135,20 @@ input.travel-over-limit{border-color:#ca303a!important;box-shadow:0 0 0 1px rgba
 .dimension-hoistway .dimension-entry:has(.mr-bed-shaft-note:not([hidden])) .mr-bed-shaft-note{grid-column:3}
 .dimension-hoistway .dimension-entry:has(.mr-bed-shaft-note:not([hidden])) input{grid-column:2}
 .dimension-entry input.mr-bed-over-max{border-color:#d38a35;background:#fff9ed}
+
+/* MR only – permanently visible MH maintenance headroom guidance (display only). */
+.dimension-hoistway .dimension-entry .mr-mh-maintenance-note{
+  grid-column:3;display:block;min-width:0;margin:0;
+  color:#65788a;font-size:11px;font-style:italic;font-weight:400;
+  line-height:1.5;overflow-wrap:break-word;
+}
+.dimension-hoistway .dimension-entry:has(.mr-mh-maintenance-note) input{grid-column:2}
+@media(max-width:580px){
+ .dimension-hoistway .dimension-entry .mr-mh-maintenance-note{
+  grid-column:2;grid-row:auto;font-size:10.5px;margin-top:-2px;
+ }
+}
+
 /* Mobile: full-width structural note below AH/BH rather than squeezed into the input column. */
 @media(max-width:740px){
  .dimension-hoistway .dimension-entry:has(.mr-bed-shaft-note:not([hidden])){align-items:start;row-gap:6px}
@@ -230,9 +250,17 @@ input:disabled,select:disabled,input[readonly],.readonly-value{background:#f0f2f
   .mobile-actions button{min-height:40px!important;padding:8px 5px!important}
 }
 </style>
+<style id="v5892-jamb-depth">
+.jamb-jd-field{display:flex;flex-direction:column;gap:5px;margin:8px 0 2px;padding:9px 11px;border:1px solid #e4eaf1;background:#f8fafc;border-radius:5px}
+.jamb-jd-field[hidden]{display:none!important}
+.jamb-jd-field .nm{display:block!important;font-size:12px;font-weight:650;color:#34465c}
+.jamb-jd-field select{width:100%;max-width:320px;height:38px}
+.jamb-jd-range{font-size:11px;color:#5a7086}
+@media(max-width:740px){.jamb-jd-field{margin-top:6px;padding:7px}.jamb-jd-field select{max-width:none}}
+</style>
 </head>
 <body>
-<header class="site-header"><div class="brand"><i class="brand-bar" aria-hidden="true"></i><div class="brand-text">MITSUBISHI ELECTRIC VIETNAM<span class="brand-sub">SALES ENGINEERING • TECHNICAL SPECIFICATION</span></div></div><span class="brand-side">SPEC ENGINEERING · v5.8.68</span></header>
+<header class="site-header"><div class="brand"><i class="brand-bar" aria-hidden="true"></i><div class="brand-text">MITSUBISHI ELECTRIC VIETNAM<span class="brand-sub">SALES ENGINEERING • TECHNICAL SPECIFICATION</span></div></div><span class="brand-side">SPEC ENGINEERING · v5.8.92</span></header>
 <main class="workspace">
 <div class="intro"><div><h1 class="intro-title">Đặc tính kỹ thuật <span style="font-weight:500;color:#78899c;font-size:.72em">/ Specifications</span></h1><p class="intro-caption">NEXIEZ ALPHA</p></div><div class="model-control"><label class="label-top" for="model">Chọn model / Select model</label><select id="model"><option value="MR">NEXIEZ-MR ALPHA</option><option value="MRL">NEXIEZ-MRL Version2 ALPHA</option></select></div></div>
 <details class="database-options" hidden aria-hidden="true"><summary>Cập nhật dữ liệu Excel / Update database</summary><div class="database-content"><div class="database-meta" id="filename"></div><input id="file" type="file" accept=".xlsx,.xlsm" aria-label="Nạp workbook Excel"><div class="database-buttons"><button class="btn btn-small" id="reload-db" type="button">Nạp lại Database</button><button class="btn btn-small" id="reset" type="button">Khôi phục Database gốc</button><button class="btn btn-small" id="working" type="button">Lưu bản đang nhập (.xlsx)</button></div><div id="status" class="status-message" aria-live="polite"></div></div></details>
@@ -304,12 +332,13 @@ input:disabled,select:disabled,input[readonly],.readonly-value{background:#f0f2f
 <script src="mrl-decoration-v02.js?v=5.8.79"></script>
 <script src="feature-v02.js?v=5.8.79"></script>
 <script src="mirror-rules.js?v=5.8.79"></script>
-<script src="export-engine.js?v=5.8.91"></script>
+<script src="jamb-depth.js?v=5.8.94"></script>
+<script src="export-engine.js?v=5.8.94"></script>
 <script src="print-layout.js?v=5.8.91"></script>
 <script src="design-guide.js?v=5.8.79"></script>
 <script src="panel-images.js?v=5.8.79"></script>
 <script src="material-finish.js?v=5.8.79"></script>
-<script src="app.js?v=5.8.84"></script>
+<script src="app.js?v=5.8.94"></script>
 
 <script>
 for(const [quick,main] of [["m-check","check"],["m-xlsx","final-xlsx"],["m-pdf","final-pdf"]]){const b=document.getElementById(quick),target=document.getElementById(main);b.addEventListener("click",()=>target.click());}
