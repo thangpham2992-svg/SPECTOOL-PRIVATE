@@ -307,6 +307,25 @@ window.SPEC_SOURCE_CHECK=function(model,changes,db){
   if(isOn&&String(option.value).trim().toUpperCase()==='X')issue('SpecForm!E'+r,addr,`${db.sheets.SpecForm['B'+r]} không được áp dụng trong Group Control hiện tại / Feature unavailable (Option X)`);
   verified.push('SpecForm!E'+r);
  }
+ // Both elevator models: car wall and car transom must use the SAME
+ // material/finish family. Painting colors and decorative patterns are separate
+ // options and are deliberately not compared under this material-only rule.
+ {
+  const wallAddr=model==='MR'?'D47':'D43';
+  const transomAddr=model==='MR'?'D53':'D49';
+  const wall=value('SpecForm',wallAddr),transom=value('SpecForm',transomAddr);
+  if(!wall.ok||!transom.ok){
+   unverified.push('Car wall / Transom material — '+(wall.error||transom.error));
+  }else{
+   const w=String(wall.value??'').trim().replace(/\s+/g,' ').toUpperCase();
+   const t=String(transom.value??'').trim().replace(/\s+/g,' ').toUpperCase();
+   if(w&&t&&w!==t){
+    issue('Material!CarWall-Transom',transomAddr,
+      'Vật liệu Đố cửa trên (Transom Panel) phải giống Vách phòng thang (Car wall): '+String(wall.value)
+      +'. / Transom panel material must match Car wall.');
+   }else if(w&&t)verified.push('SpecForm!'+wallAddr+'/'+transomAddr+' — matching Car wall and Transom material');
+  }
+ }
  // NEXIEZ-MRL Version02 — Manual feature notes and selected Hall Lantern equipment.
  // Hall selections are additional optional equipment inputs, not Capacity constraints.
  if(model==='MRL'&&window.SPEC_HALL_LANTERN){

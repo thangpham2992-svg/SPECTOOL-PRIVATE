@@ -160,7 +160,12 @@ window.SPEC_LEGACY_STEP1=function(model,changes,db){
   const P='K36_PIV'+key,H='K36_HBV'+key,I='K36_PIH_PID'+key;
   const piv=f(P),hbv=f(H),pih=f(I);
   if(requireSingle&&!notSup(piv)&&!['71','73','766','1010','1030'].some(c=>piv.includes(c)))mark(P,`PIV ${piv} không áp dụng điều khiển nhóm ${group} / Invalid hall fixture for control group`);
-  if(!notSup(piv)&&!notSup(hbv))mark(P,`Không được đồng thời sử dụng PIV và HBV tại ${key} / PIV and HBV cannot coexist`);
+  // Exception confirmed by Sales Engineering: PIV may share a landing with
+  // HBV1-F716N / HBV2-F716N / HBV3-F716N / HBV4-F716N only.
+  // Attribute any other simultaneous PIV/HBV failure to HBV, the conflicting fixture.
+  const pivWithHBVException=/^HBV[1-4]-F716N$/i.test(hbv);
+  if(!notSup(piv)&&!notSup(hbv)&&!pivWithHBVException)
+   mark(H,`Tầng ${key}: PIV không dùng đồng thời với HBV ${hbv}. Chỉ cho phép HBV1/2/3/4-F716N. / PIV cannot share this floor with HBV except HBV1/2/3/4-F716N.`);
   if(!notSup(piv)&&!notSup(pih)&&(model==='MRL'||key==='MainFloor'))mark(P,`Không được đồng thời sử dụng PIV và PIH/PID tại ${key} / Incompatible hall fixtures`);
   if(notSup(piv)&&notSup(hbv))mark(P,`Phải chọn PIV hoặc HBV tại ${key} / At least one hall fixture is required`);
  }

@@ -879,6 +879,14 @@ function workbookChoices(field,engine=null){
  // are reported by SPEC_NY40_RULES.validate, rather than silently overwritten.
  if($('model').value==='MRL'&&window.SPEC_NY40_RULES?.allowedLocations(String(currentValue('D14')))
     &&['K26_CarFrontFinish','K25_CarTransomFinish','K27_Kickplate'].includes(field.name))list=['SUS-HL'];
+ // Car wall is the master material for the transom panel in both MR and MRL.
+ // Preserve factory restrictions (e.g. NY-40 SUS-HL): if the wall material is
+ // not in the allowed Transom list, keep the actual allowed list and let
+ // Check Spec flag the incompatible wall/transom combination.
+ if(field.name==='K25_CarTransomFinish'){
+  const wall=String(currentValue($('model').value==='MR'?'D47':'D43')||'').trim();
+  if(wall&&list.some(x=>String(x).trim()===wall))list=[wall];
+ }
  return [...new Set(list.map(v=>String(v??'').trim()).filter(Boolean))];
 }
 function hasDropdown(field){return Boolean(field.validation||supplementalListSources[field.name]||(field.options||[]).length||field.cell==='D23'&&$('model').value==='MRL'||field.name==='K18_CarJJ'&&$('model').value==='MRL')}
@@ -1159,6 +1167,17 @@ function row(field,displayName='',compact=false){
     const model=$('model').value,fin=current.fields.find(x=>x.name==='K22_CeilingColor');
     if(fin){const chosen=window.SPEC_CEILING_FINISH.next(model,input.value,currentValue(fin.cell));
      if(String(currentValue(fin.cell))!==chosen)applyValue(fin.cell,chosen);}
+   }
+   // Material-only sync: changing Car wall also sets Transom material, if that
+   // value is available under the current factory / observation restrictions.
+   // Paint color and PPS pattern remain independent selections.
+   if(field.name==='K23_WallFinish'){
+    const transom=current.fields.find(x=>x.name==='K25_CarTransomFinish');
+    if(transom){
+     const allowed=workbookChoices(transom);
+     if(allowed.includes(String(input.value).trim())&&String(currentValue(transom.cell))!==String(input.value).trim())
+      applyValue(transom.cell,String(input.value).trim());
+    }
    }
    if($('model').value==='MRL'&&field.cell==='D14'&&window.SPEC_NY40_RULES){
      const allowed=window.SPEC_NY40_RULES.allowedLocations(input.value);
