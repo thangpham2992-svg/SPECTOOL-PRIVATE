@@ -16,8 +16,8 @@
     return match?'E-'+match[1]:'';
   }
   function limits(type){
-    if(type==='E-202')return {min:130,max:600};
-    if(type==='E-302')return {min:135,max:600};
+    if(type==='E-202')return {min:130,max:600,step:5};
+    if(type==='E-302')return {min:135,max:600,step:5};
     return null; // E-102 is fixed narrow jamb: no JD selector and no JD export.
   }
   function validate(model,get){
@@ -27,10 +27,10 @@
       const jamb=jambType(get(floor.cell)),range=limits(jamb);
       if(!range)continue;
       const raw=String(get(floor.key)??'').trim();
-      const valid=/^\d+$/.test(raw)&&Number(raw)>=range.min&&Number(raw)<=range.max;
+      const valid=/^\d+$/.test(raw)&&Number(raw)>=range.min&&Number(raw)<=range.max&&(Number(raw)-range.min)%range.step===0;
       if(!valid){
         errors.push({id:'JD!'+floor.key,cell:floor.key,floor:floor.floorVi,
-          message:`${floor.floorVi}: ${jamb} yêu cầu JD từ ${range.min} đến ${range.max} mm. Hãy chọn JD hợp lệ / Select JD ${range.min}–${range.max} mm.`});
+          message:`${floor.floorVi}: ${jamb} yêu cầu JD từ ${range.min} đến ${range.max} mm, bước ${range.step} mm. Hãy chọn JD hợp lệ / Select JD ${range.min}–${range.max} mm (step ${range.step} mm).`});
       }
     }
     return errors;

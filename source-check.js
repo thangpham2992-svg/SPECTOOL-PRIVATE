@@ -307,6 +307,46 @@ window.SPEC_SOURCE_CHECK=function(model,changes,db){
   if(isOn&&String(option.value).trim().toUpperCase()==='X')issue('SpecForm!E'+r,addr,`${db.sheets.SpecForm['B'+r]} không được áp dụng trong Group Control hiện tại / Feature unavailable (Option X)`);
   verified.push('SpecForm!E'+r);
  }
+ // HE-B is an optional feature but needs BOTH DKO-TB and EXCL selected.
+ // Do not auto-enable dependencies: expose the missing features so the user
+ // can decide explicitly. This applies to MR and MRL and also protects Export.
+ {
+   const selected=code=>{const cell=featureByCode[code.toLowerCase()];
+     if(!cell)return false;
+     const r=value('SpecForm',cell);
+     return r.ok&&[1,true,'1','TRUE','V','✓'].includes(String(r.value).trim().toUpperCase());
+   };
+   if(selected('HE-B')){
+     const missing=['DKO-TB','EXCL'].filter(code=>!selected(code));
+     if(missing.length){
+       const heb=featureByCode['he-b'];
+       issue('Feature!HE-B-Dependencies',heb||'','HE-B chỉ áp dụng khi đồng thời chọn DKO-TB và EXCL. Còn thiếu: '+missing.join(' và ')+'. / HE-B requires both DKO-TB and EXCL.');
+     }else verified.push('Feature HE-B: DKO-TB and EXCL selected');
+   }
+ }
+ // NEXIEZ-MR COP C760/C770/C780 has only one indicator position:
+ // OLHL (Overload Holding Stop Light) and EXCL-C (source code EXCLC)
+ // are mutually exclusive. Do not automatically discard a user selection;
+ // Check Spec must identify the precise conflict and give the requested message.
+ if(model==='MR'){
+   const copCode=value('SpecForm','D65');
+   const copModel=value('SpecForm','F63');
+   const number=String(copCode.ok?copCode.value:'').trim().toUpperCase().replace(/^C/,'');
+   const physicalCop=String(copModel.ok?copModel.value:'').trim().toUpperCase();
+   const restricted=/^(?:760|770|780)$/.test(number)||/\bC(?:760|770|780)\b/.test(physicalCop);
+   const selected=code=>{
+     const cell=featureByCode[code.toLowerCase()];
+     if(!cell)return false;
+     const result=value('SpecForm',cell);
+     return result.ok&&['1','TRUE','V','✓'].includes(String(result.value).trim().toUpperCase());
+   };
+   if(restricted&&selected('OLHL')&&selected('EXCLC')){
+     issue('Feature!MR_COP_OLHL_EXCLC',featureByCode.olhl||featureByCode.exclc||'D65',
+       'Chỉ hiển thị được 1 tính năng. Với COP C760/C770/C780, chỉ được chọn OLHL hoặc EXCL-C, không được chọn đồng thời cả hai. / Only one of OLHL or EXCL-C may be selected.');
+   }else if(restricted){
+     verified.push('MR COP C760/C770/C780: OLHL / EXCL-C exclusivity checked');
+   }
+ }
  // Both elevator models: car wall and car transom must use the SAME
  // material/finish family. Painting colors and decorative patterns are separate
  // options and are deliberately not compared under this material-only rule.

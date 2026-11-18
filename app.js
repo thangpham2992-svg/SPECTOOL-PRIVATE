@@ -11,7 +11,7 @@ let models={MR:structuredClone(window.SPEC_EMBEDDED.MR),MRL:structuredClone(wind
 let layouts=structuredClone(window.SPEC_LAYOUT);
 for(const k of ['MR','MRL']) models[k].fields.push(...structuredClone(window.SPEC_EXTRAS[k]));
 let sourceFiles={},current=null,changes={};
-function status(message,cls=''){$('status').className=cls;$('status').textContent=message}
+function status(message,cls=''){$('status').className=cls;$('status').textContent=window.SPEC_PROOFREAD?.(message)??message}
 function bytesFromB64(b64){const raw=atob(b64),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return bytes}
 const colnum=col=>Array.from(col).reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);
 function colname(n){let s='';while(n){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)}return s}
@@ -655,7 +655,7 @@ function renderFeatures(){
  tables.forEach(t=>{let b=document.createElement('button');const selected=features.some(f=>f.table===t&&featureIsSelected(f));b.className='btn feature-tab'+(selected?' feature-tab-selected':'')+(t===activeFeatureTable?' feature-tab-current':'');b.textContent=({TblFeature_Emergency:'Khẩn cấp / Emergency',TblFeature_Operation:'Vận hành / Operation',TblFeature_Door:'Cửa / Door',TblFeature_Signal:'Tín hiệu / Signal',TblFeature_Traffic:'Giao thông / Traffic'})[t]||t;b.onclick=()=>{activeFeatureTable=t;renderFeatures()};tabs.append(b)});
  const db=workbookEngineData(),featureEngine=db&&window.SpecExcelSourceEngine?new window.SpecExcelSourceEngine.SourceEngine(db,changes):null;
  for(const f of features.filter(f=>f.table===activeFeatureTable)){
-  const line=document.createElement('div');line.className='feature-line';let addr=document.createElement('span');addr.textContent=f.cell;addr.className='addr';let code=document.createElement('span');code.textContent=f.code;code.className='fcode';let desc=document.createElement('span');desc.className='fdesc';desc.textContent=f.vi||f.code;let en=document.createElement('small');en.textContent=f.en||'';desc.append(en);
+  const line=document.createElement('div');line.className='feature-line';let addr=document.createElement('span');addr.textContent=f.cell;addr.className='addr';let code=document.createElement('span');code.textContent=f.code;code.className='fcode';let desc=document.createElement('span');desc.className='fdesc';desc.textContent=window.SPEC_PROOFREAD?.(f.vi||f.code)??(f.vi||f.code);let en=document.createElement('small');en.textContent=window.SPEC_PROOFREAD?.(f.en||'')??(f.en||'');desc.append(en);
   let chk=document.createElement('input');chk.type='checkbox';chk.dataset.cell=f.cell;chk.checked=String(changes[f.cell]??f.apply)==='1'||String(changes[f.cell]??f.apply).toLowerCase()==='true';const optResult=f.virtual?null:featureEngine?.safe('SpecForm','E'+f.cell.slice(1));const manualOption=window.SPEC_V52_FEATURES?.status($('model').value,f.code,currentValue($('model').value==='MR'?'D21':'D22'),db);const dynamicOption=manualOption|| (optResult?.ok?optResult.value:f.option);let disabled=String(dynamicOption).trim().toUpperCase()==='X';
   const fCode=window.SPEC_V52_FEATURES?.canonical(f.code)||f.code;
   // NSCR-C and NSCR-H are independent options; the card-reader variant
@@ -668,6 +668,14 @@ function renderFeatures(){
     // Technical requirements (e.g. EVRC-C/S for COP C760) remain Check Spec rules.
     if(sourceStatus==='A'||sourceStatus==='S')disabled=false;
     line.title='NSCR-C: hạn chế cuộc gọi trong cabin (CAR CALL). Khác NSCR-H: cuộc gọi tại tầng (HALL CALL).';
+  }
+  if(fCode==='HE-B'){
+   const selected=name=>features.some(z=>(window.SPEC_V52_FEATURES?.canonical(z.code)||z.code)===name&&featureIsSelected(z));
+   const missing=['DKO-TB','EXCL'].filter(name=>!selected(name));
+   line.title='HE-B chỉ hợp lệ khi chọn cả DKO-TB và EXCL / Requires both DKO-TB and EXCL.';
+   if(missing.length){const requirement=document.createElement('small');requirement.className='feature-dependency-note';
+    requirement.textContent='Yêu cầu / Requires: DKO-TB + EXCL'+(chk.checked?' (còn thiếu / missing: '+missing.join(', ')+')':'');
+    desc.append(requirement);}
   }
   if(fCode==='NSCR-H'){
     line.title='NSCR-H: hạn chế cuộc gọi tại tầng (HALL CALL). Không thay thế NSCR-C (CAR CALL).';
@@ -691,7 +699,12 @@ function renderFeatures(){
    if($('model').value==='MRL'&&code==='FHL'&&!chk.checked&&window.SPEC_HALL_LANTERN?.any(changes)){
      chk.checked=true;changes[f.cell]='1';status('FHL phải đi kèm Hall Lantern đã chọn / FHL is required while lanterns are selected.');return;
    }
-   featureTouched.add(f.cell);changes[f.cell]=chk.checked?'1':'0';line.classList.toggle('feature-line-selected',chk.checked);tabs.querySelectorAll('.feature-tab').forEach(b=>{const group=tables.find(t=>b.textContent===(({TblFeature_Emergency:'Khẩn cấp / Emergency',TblFeature_Operation:'Vận hành / Operation',TblFeature_Door:'Cửa / Door',TblFeature_Signal:'Tín hiệu / Signal',TblFeature_Traffic:'Giao thông / Traffic'})[t]||t));if(group)b.classList.toggle('feature-tab-selected',features.some(x=>x.table===group&&featureIsSelected(x)))});
+   featureTouched.add(f.cell);changes[f.cell]=chk.checked?'1':'0';line.classList.toggle('feature-line-selected',chk.checked);
+   if(code==='HE-B'&&chk.checked){
+     const active=c=>sourceFeatureRows().some(f=> (window.SPEC_V52_FEATURES?.canonical(f.code)||f.code)===c&&featureIsSelected(f));
+     const missing=['DKO-TB','EXCL'].filter(c=>!active(c));
+     if(missing.length)status('HE-B yêu cầu chọn đồng thời DKO-TB và EXCL. Còn thiếu: '+missing.join(', '));
+   }tabs.querySelectorAll('.feature-tab').forEach(b=>{const group=tables.find(t=>b.textContent===(({TblFeature_Emergency:'Khẩn cấp / Emergency',TblFeature_Operation:'Vận hành / Operation',TblFeature_Door:'Cửa / Door',TblFeature_Signal:'Tín hiệu / Signal',TblFeature_Traffic:'Giao thông / Traffic'})[t]||t));if(group)b.classList.toggle('feature-tab-selected',features.some(x=>x.table===group&&featureIsSelected(x)))});
    // v5.8.41: EVRC-C (not EVRC-S) is mandatory with NSCR-C/AS/SCS-B/NS-CB
    // for MR C760/C770/C780 and MRL V02 M*/P* COP codes.
    if(chk.checked&&['NSCR-C','AS','SCS-B','NS-CB'].includes(code)){
@@ -1135,14 +1148,14 @@ function row(field,displayName='',compact=false){
  const box=document.createElement('div');box.className='field';
  box.dataset.sourceCell=field.cell;
  // Source identifiers remain as data-cell attributes for Check Spec, focus and Export.
- const name=document.createElement('label');name.className='nm';name.textContent=displayName||xrules().labels[field.cell]||field.label||field.name.replace(/^K\d+_/,'').replaceAll('_',' ');
+ const name=document.createElement('label');name.className='nm';name.textContent=window.SPEC_PROOFREAD?.(displayName||xrules().labels[field.cell]||field.label||field.name.replace(/^K\d+_/,'').replaceAll('_',' '))??(displayName||xrules().labels[field.cell]||field.label||field.name.replace(/^K\d+_/,'').replaceAll('_',' '));
  const choices=workbookChoices(field);const input=hasDropdown(field)?document.createElement('select'):document.createElement('input');input.dataset.cell=field.cell;input.id='spec-'+field.cell;
  name.htmlFor=input.id;
  let value=String(field.value??'');
  if(input.tagName==='SELECT'){
   const options=[...choices.map(String)];if(value&&!choices.includes(value)&&!field.validation&&!supplementalListSources[field.name])options.unshift(value);
   if(!options.length)options.push('');
-  for(const option of [...new Set(options)]){const opt=document.createElement('option');opt.value=option;opt.textContent=option||'— Chọn / Select —';input.append(opt)}
+  for(const option of [...new Set(options)]){const opt=document.createElement('option');opt.value=option;opt.textContent=window.SPEC_PROOFREAD?.(option||'— Chọn / Select —')??(option||'— Chọn / Select —');input.append(opt)}
  }else input.placeholder='';
  input.value=value;
  input.addEventListener('change',()=>{
@@ -1184,6 +1197,7 @@ function row(field,displayName='',compact=false){
      if(allowed&&!allowed.includes(String(currentValue('D65'))))applyValue('D65',allowed[0]);
    }
    syncDropdownOptions();
+   refreshNY40CopChoices();
    refreshSideDrop();
    refreshLocks();
    refreshJambDepthFields();
@@ -1560,17 +1574,17 @@ function refreshJambDepthFields(){
   if(!range)continue;
   const select=block.querySelector('select');
   const prev=String(changes[config.key]??'');
-  // Populate every integer in the published inclusive range, without assuming a 5/10 mm step.
+  // The customer-approved JD selector uses exactly 5-mm increments within each published range.
   if(select.dataset.min!==String(range.min)){
    select.replaceChildren();
    const blank=document.createElement('option');blank.value='';blank.textContent='— Chọn JD (mm) / Select —';select.append(blank);
-   for(let value=range.min;value<=range.max;value++){
+   for(let value=range.min;value<=range.max;value+=range.step){
     const option=document.createElement('option');option.value=String(value);option.textContent=value+' mm';select.append(option);
    }
    select.dataset.min=String(range.min);
   }
-  select.value=(/^\d+$/.test(prev)&&Number(prev)>=range.min&&Number(prev)<=range.max)?prev:'';
-  block.querySelector('.jamb-jd-range').textContent=selectedType+': '+range.min+' ≤ JD ≤ '+range.max+' mm';
+  select.value=(/^\d+$/.test(prev)&&Number(prev)>=range.min&&Number(prev)<=range.max&&(Number(prev)-range.min)%range.step===0)?prev:'';
+  block.querySelector('.jamb-jd-range').textContent=selectedType+': '+range.min+' ≤ JD ≤ '+range.max+' mm · Bước / Step '+range.step+' mm';
  }
 }
 
@@ -1606,6 +1620,25 @@ function refreshGroupControlPreview(){
   groupControlPreviewTimer=null;
  },5000);
 }
+function refreshNY40CopChoices(){
+ if($('model').value!=='MRL')return;
+ const obs=String(currentValue('D14')||'').trim();
+ const isNY40=/^NY-40[A-E]$/.test(obs);
+ for(const [cell,disallow] of [
+  ['D61',v=>/^[MP]\d/i.test(v)],
+  ['D62',v=>v!==''&&!/^(?:NO|NONE|NOT SUPPLIED|KHÔNG CUNG CẤP)$/i.test(v)]
+ ]){
+   const input=activeInput(cell);if(!input||input.tagName!=='SELECT')continue;
+   for(const option of input.options){
+     option.disabled=isNY40&&disallow(String(option.value).trim());
+   }
+   let help=input.closest('.field')?.querySelector('.ny40-cop-hint');
+   if(isNY40){
+     if(!help){help=document.createElement('small');help.className='ny40-cop-hint';input.closest('.field')?.append(help);}
+     if(help){help.textContent=cell==='D61'?'NY-40: không chọn COP M/P / M and P COP not permitted.':'NY-40: không sử dụng Auxiliary/Wheelchair COP / Not permitted.';help.hidden=false;}
+   }else if(help)help.hidden=true;
+ }
+}
 function renderAllSpecRows(){
  const rows=current.layout||layouts[$('model').value]||[];
  const byRow=new Map();for(const f of current.fields){const n=split(f.cell)[1];if(!byRow.has(n))byRow.set(n,[]);byRow.get(n).push(f)}
@@ -1620,7 +1653,7 @@ function renderAllSpecRows(){
   const major=String(info.B||'').trim();const sub=String(info.C||'').trim();
   if(/^([IVX]+)\.\s*/.test(major)){
    section=document.createElement('section');section.className='spec-section';section.dataset.section=major.match(/^([IVX]+)/)[1];
-   const heading=document.createElement('h2');heading.className='section-heading';heading.textContent=headingText(major);
+   const heading=document.createElement('h2');heading.className='section-heading';heading.textContent=window.SPEC_PROOFREAD?.(headingText(major))??headingText(major);
    sectionRows=document.createElement('div');sectionRows.className='section-fields';
    section.append(heading,sectionRows);root.append(section);lastMajor='';continue;
   }
@@ -1631,7 +1664,7 @@ function renderAllSpecRows(){
   const label=major&&sub&&!isInfoNote?major+' · '+subLabel(sub):currentLabel||lastMajor;
   if(!fields.length && !String(info.D||'').trim())continue;
   const sectionRow=document.createElement('div');sectionRow.className='spec-row';sectionRow.dataset.row=info.row;
-  const text=document.createElement('div');text.className='spec-row-title';text.textContent=headingText(label||lastMajor);
+  const text=document.createElement('div');text.className='spec-row-title';text.textContent=window.SPEC_PROOFREAD?.(headingText(label||lastMajor))??headingText(label||lastMajor);
   const area=document.createElement('div');area.className='spec-row-inputs';
   if(fields.length>1){
    sectionRow.classList.add('span-full','multi');
@@ -1874,7 +1907,7 @@ function refreshLeadTime(){
 // delegated controls and model/database reloads. No export pipeline changes.
 document.addEventListener('change',()=>queueMicrotask(refreshLeadTime));
 
-function load(){clearGroupControlPreview();featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRDefaultGroupAndFER();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshGroupControlPreview();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
+function load(){clearGroupControlPreview();featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRDefaultGroupAndFER();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshNY40CopChoices();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshGroupControlPreview();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
 
 function issueDetails(raw){
  const m=/^([A-Z]{1,3}\d+):\s*(.*)$/.exec(raw);
@@ -2000,7 +2033,7 @@ function check(){
   const decor=evaluateMRLDecoration();
   if(decor){
    result.errors.push(...decor.errors);
-   if(decor.state==='unavailable')result.unverified.push('Decoration Weight Maximum Version02: '+decor.reason);
+   if(decor.state==='unavailable')result.unverified.push('Decoration Weight Maximum NEXIEZ-MRL Version2: '+decor.reason);
    if(decor.errors.length)result.status='FAIL';
    else if(decor.state==='unavailable'&&result.status==='PASS')result.status='INCOMPLETE';
    if(decor.state==='ready')result.verified.push('Technical Study G11L1 v2.5.0.0: '+decor.max+' kg excluding flooring');
@@ -2048,10 +2081,13 @@ function renderSourceCheck(result){
  if(!failed){
   // When the Version02 mass table is incomplete, show a direct link at D57
   // without pretending this is an incorrect user input.
-  if(incomplete && $('model').value==='MRL' && (result.unverified||[]).some(x=>/Decoration Weight Maximum Version02/.test(String(x)))){
+  if(incomplete && $('model').value==='MRL' && (result.unverified||[]).some(x=>/Decoration Weight Maximum NEXIEZ-MRL Version2/.test(String(x)))){
    const notice=document.createElement('button');notice.type='button';notice.className='check-error-row';
-   notice.textContent='Chưa xác minh Maximum Decoration Weight (D57) — '+(result.unverified||[]).filter(x=>/Decoration Weight Maximum Version02/.test(String(x))).map(x=>String(x).replace(/^Decoration Weight Maximum Version02:\s*/, '')).join('; ');
-   notice.onclick=()=>focusIssue('D57');wrap.append(notice);
+   notice.textContent='Chưa xác minh Maximum Decoration Weight (D57) — '+(result.unverified||[]).filter(x=>/Decoration Weight Maximum NEXIEZ-MRL Version2/.test(String(x))).map(x=>String(x).replace(/^Decoration Weight Maximum NEXIEZ-MRL Version2:\s*/, '')).join('; ');
+   // Observation wall MethodDef 69 can be unsupported for the selected COP.
+   // Link to the actual incompatible COP selection instead of only to D57.
+   const relatedToCop=(result.unverified||[]).some(x=>/Decoration Weight Maximum NEXIEZ-MRL Version2:.*không có nhánh tính khối lượng vách.*COP/i.test(String(x)));
+   notice.onclick=()=>focusIssue(relatedToCop?'D61':'D57');wrap.append(notice);
   }
   addFloorLedWarning();return;
  }
@@ -2085,7 +2121,7 @@ function renderSourceCheck(result){
   if(!name||name===cell)name='Thông số kỹ thuật';
   // NSCR-C/C760: explain required EVRC choice, instead of merely showing an
   // unlabeled failed NSCR-C row. Clicking the error opens Operation at EVRC-C.
-  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
+  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('NY40!')||String(err.id)==='Feature!HE-B-Dependencies'||String(err.id)==='Feature!MR_COP_OLHL_EXCLC'||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
   const priority=isDimension(cell)?dimensionPriority(err):0;
   const old=fields.get(cell);
   if(!old||priority>old.priority)fields.set(cell,{name,message,priority});

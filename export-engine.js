@@ -90,6 +90,19 @@
        else {cells[addr]='';unresolved.push({addr,formula:entry.f,error:result.error})}
      }else cells[addr]=entry?.v??entry??'';
    }
+   // Explicit rated duration requested for the EN81-58(II) option in both
+   // NEXIEZ-MR and NEXIEZ-MRL Version2. The source SpecFormExport omits
+   // the duration; keep the remaining options (No, GHCL E30) unchanged.
+   const fireInputAddr=nameAddr(db,'SpecForm','K36_FireproofDoor');
+   const fireExportAddr=nameAddr(db,'SpecFormExport','K36_FireproofDoor');
+   if(fireInputAddr&&fireExportAddr){
+     const fireSelected=text(eng.safe('SpecForm',fireInputAddr).value).trim();
+     if(/^EN81[-\s]*58\s*\(II\)$/i.test(fireSelected)){
+       cells[fireExportAddr]=
+        'Cửa chống cháy EN81-58(II), khả năng chịu lửa 120 phút.\n'+
+        '(Fire-rated landing door EN81-58(II), 120-minute fire resistance.)';
+     }
+   }
    const featureGroups=['Emergency','Door','Operation','Signal','Traffic'];
    const removedFeatures=[],includedFeatures=[];
    for(let index=0;index<featureGroups.length;index++){
@@ -382,8 +395,23 @@
      }
      cells.A87='V. Các tính năng (Features) :';
    }
+   // NEXIEZ-MR uses the same Jamb output rows C68/C70 but does not enter the
+   // MRL-specific combined Entrance Design layout above. Append JD here for MR.
+   if(model==='MR'&&window.SPEC_JAMB_DEPTH){
+     for(const floor of window.SPEC_JAMB_DEPTH.floorsForModel(model)){
+       const jamb=window.SPEC_JAMB_DEPTH.jambType(eng.safe('SpecForm',floor.cell).value);
+       if(!window.SPEC_JAMB_DEPTH.limits(jamb))continue;
+       const jd=text(changes[floor.key]).trim();
+       cells['C'+floor.exportRow]=text(cells['C'+floor.exportRow]).trimEnd()+'\n'+window.SPEC_JAMB_DEPTH.description(jd);
+     }
+   }
    // MR source has two historical MBSS #N/A lookups on feature rows that are removed
    // when MBSS does not apply; only unresolved visible output cells block export.
+   // Correct spelling in every customer-facing output cell, including formula results.
+   // This must run after all layout transformations; source workbook data stays intact.
+   if(window.SPEC_PROOFREAD){
+     for(const addr of Object.keys(cells)){if(typeof cells[addr]==='string')cells[addr]=window.SPEC_PROOFREAD(cells[addr]);}
+   }
    const fatal=unresolved.filter(e=>!hiddenRows.has(cellRow(e.addr))&&/^[ABC]/.test(e.addr));
    if(fatal.length)throw Error('Công thức Export chưa tính được / Cannot evaluate '+fatal.slice(0,5).map(x=>x.addr+' '+x.error).join(' | '));
    return {model,cells,hiddenRows,removedFeatures,includedFeatures,sections,hiddenHall,hallLanternExportRows,totalFormulaUnresolved:unresolved.length,fatal,traction:model==='MR'?mrDutyBySpec(eng):null,mrlMotor:model==='MRL'?mrlMotorBySpec(eng):null};
