@@ -1309,6 +1309,22 @@ function applyMRBedDefaults(capacity){
   }
  }
 }
+// v5.8.95: Sales consultation defaults for NEXIEZ-MR only.
+// Apply once on MR load. Subsequent user selections and FER toggles remain editable.
+// Store overrides in `changes` so source Check Spec and Excel/PDF Export agree with the UI.
+function setMRDefaultGroupAndFER(){
+ if($('model').value!=='MR')return;
+ const groupField=current.fields.find(f=>f.name==='K13_Operation');
+ if(groupField)applyValue(groupField.cell,'1C-2BC');
+ const fer=sourceFeatureRows().find(f=>(window.SPEC_V52_FEATURES?.canonical(f.code)||f.code)==='FER');
+ if(fer){
+  const option=window.SPEC_V52_FEATURES?.status('MR','FER','1C-2BC',workbookEngineData());
+  if(String(option||fer.option).trim().toUpperCase()!=='X'){
+   changes[fer.cell]='1';
+   featureTouched.delete(fer.cell);
+  }
+ }
+}
 function setMRLHandrailDefault(){
  if($('model').value!=='MRL')return;
  const field=current.fields.find(x=>x.name==='K32_Handrail');
@@ -1839,7 +1855,7 @@ function refreshLeadTime(){
 // delegated controls and model/database reloads. No export pipeline changes.
 document.addEventListener('change',()=>queueMicrotask(refreshLeadTime));
 
-function load(){clearGroupControlPreview();featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshGroupControlPreview();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
+function load(){clearGroupControlPreview();featureTouched=new Set();window.__lastCheck=null;if($('check-top')){$('check-top').textContent='Chưa kiểm tra';$('check-top').className='check-top';}if($('check-issues'))$('check-issues').replaceChildren();changes={};let model=$('model').value;current=models[model];restoreHallLanternFromSource();renderAllSpecRows();setMRDefaultGroupAndFER();setMRLHandrailDefault();if(isMRBedCapacity())applyMRBedDefaults(currentValue('D13'));refreshTwoStopTravelWarning();refreshMRBedShaftNotes();setupSpecialOptions();flooringManual=false;updateFlooringWeight(true);syncDropdownOptions();refreshSideDrop();refreshLocks();refreshDesignHints();updateFinishPreviews();refreshMirrorWeightHint();refreshMRLOverheadMinimum(false);refreshMRLShaftMinimum();renderFeatures();refreshGroupControlPreview();refreshMRLDecorationMaximum();$('numvalid').textContent=current.validations.length;$('numtables').textContent=current.table_count;$('filename').textContent=sourceFiles[model]?.name||modelFiles[model]+' (embedded copy)';status('Đã hiển thị '+(current.layout||layouts[model]).length+' dòng có nội dung trong SpecForm của '+$('model').selectedOptions[0].text+'.\nCheck Spec: tính lại công thức DataTable. Export Excel/A4 theo dữ liệu SpecFormExport, chỉ khi Check Spec PASS.','');refreshLeadTime();}
 
 function issueDetails(raw){
  const m=/^([A-Z]{1,3}\d+):\s*(.*)$/.exec(raw);
