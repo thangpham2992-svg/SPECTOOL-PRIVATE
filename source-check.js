@@ -63,7 +63,7 @@ window.SPEC_PANEL_DISPLAY_RULES=(()=>{
    ['E78','PIV','PIV tầng chính'],['E80','PIH','PIH tầng chính'],
    ['E81','PIV','PIV tầng khác']
   ];
-  return [[main,'COP','COP chính'],...hall].map(([cell,kind,label])=>({cell,kind,label,code:String(value(cell)??'').trim()}));
+  return [[main,'COP','COP số 1 (COP chính)'],...hall].map(([cell,kind,label])=>({cell,kind,label,code:String(value(cell)??'').trim()}));
  }
  return {classify,incompatible,selected};
 })();

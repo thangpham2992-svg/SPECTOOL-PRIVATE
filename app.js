@@ -1947,9 +1947,35 @@ function focusIssue(cell){
  if(!input.disabled)try{input.focus({preventScroll:true})}catch(e){input.focus()}
 }
 
+// v5.8.105: Floor Name errors must start from COP No. 1, then hall panels.
+// Ranking is independent of worksheet row numbers (MRL report otherwise sorts bottom-up).
+function floorDisplayErrorRank(err){
+ const id=String(err?.id||''),cell=String(err?.cell||'').toUpperCase();
+ if(!id.startsWith('FloorName!Display!'))return null;
+ const model=$('model').value;
+ const cop=model==='MR'?'D65':'D61';
+ if(cell===cop)return 0; // COP No. 1 (main COP)
+ const order=model==='MRL'
+  ? ['E75','E78','E81','E76','E79','E82','E77','E80','E83']
+  : ['E78','E81','E79','E82','E80','E83'];
+ const ix=order.indexOf(cell);
+ return ix>=0?10+ix:90;
+}
+function orderedCheckErrors(errors){
+ return [...errors].sort((a,b)=>{
+  const aRank=floorDisplayErrorRank(a),bRank=floorDisplayErrorRank(b);
+  if(aRank!==null||bRank!==null){
+   if(aRank===null)return 1;
+   if(bRank===null)return -1;
+   return aRank-bRank;
+  }
+  const num=e=>{const m=/\d+/.exec(String(e.cell||''));return m?Number(m[0]):9999;};
+  return $('model').value==='MRL'?num(b)-num(a):num(a)-num(b);
+ });
+}
 function renderCheckIssues(result){
  const wrap=$('check-issues');if(!wrap)return;wrap.replaceChildren();
- const all=[...result.errors.map(x=>({raw:x,type:'error'})),...result.warnings.filter(x=>/^[A-Z]{1,3}\d+:/.test(x)).map(x=>({raw:x,type:'warning'}))];
+ const all=[...orderedCheckErrors(result.errors).map(x=>({raw:x,type:'error'})),...result.warnings.filter(x=>/^[A-Z]{1,3}\d+:/.test(x)).map(x=>({raw:x,type:'warning'}))];
  const head=document.createElement('div');head.className='check-summary';
  head.textContent=result.errors.length?`FAIL — ${result.errors.length} lỗi cần sửa / ${result.errors.length} errors to fix`:'PASS PARTIAL — Đạt quy tắc đã triển khai; vẫn còn điều kiện chưa xác minh / Implemented rules passed; some conditions unverified';
  head.classList.add(result.errors.length?'check-fail':'check-pass');wrap.append(head);
@@ -2096,10 +2122,7 @@ function renderSourceCheck(result){
  });
  // Display errors of MRL Version02 from the bottom of SpecForm upwards.
  // This is UI ordering only: no input, shaft-size or validation formula changes.
- const issues=[...(filtered.length?filtered:result.errors)].sort((a,b)=>{
-  const num=error=>{const cell=String(error.cell||'');const m=/\d+/.exec(cell);return m?Number(m[0]):9999;};
-  return $('model').value==='MRL' ? num(b)-num(a) : num(a)-num(b);
- });
+ const issues=orderedCheckErrors(filtered.length?filtered:result.errors);
  const fields=new Map(),features=sourceFeatureRows();
  const sizeLabel={D33:'Chiều rộng hố thang (AH)',D34:'Chiều sâu hố thang (BH)',D36:'Chiều sâu hố PIT (PD)',D37:'Đỉnh hố thang (OH)',D40:'Chiều sâu hố PIT (PD)',D41:'Đỉnh hố thang (OH)',D35:'Chiều sâu hố thang (BH)'};
  const isDimension=cell=>$('model').value==='MRL'?['D33','D34','D36','D37'].includes(cell):['D34','D35','D40','D41'].includes(cell);
@@ -2115,10 +2138,10 @@ function renderSourceCheck(result){
   if(!name||name===cell)name='Thông số kỹ thuật';
   // NSCR-C/C760: explain required EVRC choice, instead of merely showing an
   // unlabeled failed NSCR-C row. Clicking the error opens Operation at EVRC-C.
-  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('NY40!')||String(err.id)==='FloorName!AAN-G'||String(err.id).startsWith('FloorName!Display!')||String(err.id)==='Feature!HE-B-Dependencies'||String(err.id)==='Feature!MR_COP_OLHL_EXCLC'||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
-  const priority=isDimension(cell)?dimensionPriority(err):0;
+  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('NY40!')||String(err.id)==='FloorName!AAN-G'||String(err.id).startsWith('FloorName!Display!')||String(err.id)==='Feature!HE-B-Dependencies'||(String(err.id)==='MR!SideDropBHMax'||String(err.id)==='MRL!Standard1G_BHMax'||String(err.id)==='MRL!2G_BH_Exact')||String(err.id)==='Feature!MR_COP_OLHL_EXCLC'||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
+  const priority=(String(err.id)==='MR!SideDropBHMax'||String(err.id)==='MRL!Standard1G_BHMax'||String(err.id)==='MRL!2G_BH_Exact')?10:(isDimension(cell)?dimensionPriority(err):0);
   const old=fields.get(cell);
-  if(!old||priority>old.priority)fields.set(cell,{name,message,priority});
+  if(!old||priority>old.priority)fields.set(cell,{id:String(err.id),name,message,priority});
  }
  if(top&&failed)top.textContent=`Không đạt — ${fields.size||1} lỗi`;
  if(!fields.size){const row=document.createElement('div');row.className='check-error-row';row.textContent='Có lỗi kỹ thuật cần kiểm tra';wrap.append(row);return}
@@ -2131,6 +2154,11 @@ function renderSourceCheck(result){
    // Avoid repeating the same field name in title and explanation, without hiding the limit.
    detail=detail.replace(/^(?:Đỉnh hố thang \(OH\)|Chiều sâu hố PIT \(PD\)|Chiều rộng hố thang \(AH\)|Chiều sâu hố thang \(BH\))\s*/,'');
    explanation.textContent=detail;link.append(explanation);
+  }
+  if((($('model').value==='MR'&&cell==='D35')||($('model').value==='MRL'&&cell==='D34'))&&item.priority===10&&item.id!=='MRL!2G_BH_Exact'){
+   const img=document.createElement('img');img.src='assets/mr_side_drop_bh_safety_5474.png';
+   img.alt='Minh họa lưới/vách bảo vệ phía sau, lan can tối thiểu 700 mm và gờ chắn chân tối thiểu 100 mm';
+   img.className='bh-safety-illustration';img.loading='lazy';link.append(img);
   }
   link.setAttribute('aria-label','Đến thông số lỗi: '+item.name+(item.message?' — '+item.message:''));
   link.onclick=()=>focusIssue(cell);
