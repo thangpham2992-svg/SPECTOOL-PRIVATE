@@ -1,5 +1,73 @@
 'use strict';
 /* Source workbook audit: every Condition row is recalculated, never passed from saved TRUE/FALSE. */
+/* v5.8.102 — technology of selected COP/PIV/PIH is checked against every
+   served floor name. Source: model-specific panel catalog and TblK10_SFloor.
+   Unsupported panels are hard FAIL errors, not advisory notices. */
+window.SPEC_PANEL_DISPLAY_RULES=(()=>{
+ const notSupplied=v=>!v||/^(?:NOT\s+SUPPLIED|NOT\s+APPLICABLE|NONE|NO|N\/A|0|-)$/i.test(v);
+ function classify(model,kind,raw){
+  const v=String(raw??'').trim().toUpperCase();
+  if(notSupplied(v))return 'NONE';
+  if(kind==='COP'){
+   // MR main COP: 710/760 Segment; 720/770 Dot LED; 730/780 LCD.
+   if(model==='MR'){
+    const match=/^(?:[CN]-?)?(710|720|730|760|770|780)$/.exec(v);
+    if(!match)return 'UNKNOWN';
+    return {'710':'SEGMENT','760':'SEGMENT','720':'DOT','770':'DOT','730':'LCD','780':'LCD'}[match[1]];
+   }
+   // MRL Version02: 101x Segment, 103x Dot Orange, 104x Dot White, 105x LCD.
+   // Suffix ETL = touchless; M/P/N/C identifies panel housing not technology.
+   const match=/^(?:[CMPN]-?)?(1010|1012|1015|1030|1032|1035|1040|1042|1045|1050|1052)E(?:TL)?$/.exec(v);
+   if(match)return /^(1010|1012|1015)$/.test(match[1])?'SEGMENT':
+    /^(1030|1032|1035|1040|1042|1045)$/.test(match[1])?'DOT':'LCD';
+   // Wheelchair panel variants in factory selection chart.
+   const wheelchair=/^(?:[CMPN]-?)?(660|670|650)E$/.exec(v);
+   if(wheelchair)return wheelchair[1]==='660'?'SEGMENT':'DOT';
+   return 'UNKNOWN';
+  }
+  if(kind==='PIV'){
+   // Suffix (N/H/H2/E2/B/BA/...) affects enclosure, not display hardware.
+   const m=/^PIV[1-6]-([AC])(\d{3,4})[A-Z0-9]*$/.exec(v);
+   if(!m)return 'UNKNOWN';
+   const core=m[1]+'-'+m[2];
+   if(['A-1010','A-1020','C-710','C-720'].includes(core))return 'SEGMENT';
+   if(['A-1030','A-1040','A-1080','A-1090','C-730','C-740','C-780','C-790'].includes(core))return 'DOT';
+   if(['C-766','C-776'].includes(core))return 'LCD';
+   return 'UNKNOWN';
+  }
+  if(kind==='PIH'){
+   if(v==='PIH-C117')return 'LCD';
+   if((model==='MRL'&&v==='PIH-D455')||(model==='MR'&&v==='PIH-D415'))return 'DOT';
+   if((model==='MRL'&&v==='PIH-D457')||(model==='MR'&&v==='PIH-D417'))return 'SEGMENT';
+   return 'UNKNOWN';
+  }
+  return 'UNKNOWN';
+ }
+ function incompatible(mode,row){
+  // Hierarchical capability: Segment LED ⊂ Dot LED ⊂ LCD.
+  // Even if an older factory table marks KT as Dot-only, LCD inherits Dot support.
+  if(mode==='NONE')return false;
+  if(mode==='UNKNOWN')return true;
+  if(mode==='SEGMENT')return row.segment==='N';
+  if(mode==='DOT')return row.segment==='N'&&row.dot==='N';
+  if(mode==='LCD')return row.segment==='N'&&row.dot==='N'&&row.lcd==='N';
+  return true;
+ }
+ function selected(model,value){
+  const main=model==='MR'?'D65':'D61';
+  const hall=model==='MRL'?[
+   ['E75','PIV','PIV tầng trên cùng'],['E77','PIH','PIH tầng trên cùng'],
+   ['E78','PIV','PIV tầng chính'],['E80','PIH','PIH tầng chính'],
+   ['E81','PIV','PIV tầng khác'],['E83','PIH','PIH tầng khác']
+  ]:[
+   ['E78','PIV','PIV tầng chính'],['E80','PIH','PIH tầng chính'],
+   ['E81','PIV','PIV tầng khác']
+  ];
+  return [[main,'COP','COP chính'],...hall].map(([cell,kind,label])=>({cell,kind,label,code:String(value(cell)??'').trim()}));
+ }
+ return {classify,incompatible,selected};
+})();
+
 window.SPEC_SOURCE_CHECK=function(model,changes,db){
  const Engine=window.SpecExcelSourceEngine?.SourceEngine;
  if(!Engine||!db)return {errors:['SOURCE: Không tải được Excel calculation engine / Missing source engine'],warnings:[],verified:[],unverified:['Excel engine unavailable'],details:[],pass:false};
@@ -546,32 +614,82 @@ window.SPEC_SOURCE_CHECK=function(model,changes,db){
  const hatch=window.SPEC_CF_CHECK?.(model,changes,db,eng);
  if(hatch){for(const x of hatch.errors)issues.push(x);for(const u of hatch.unknown)unverified.push(u);for(const v of hatch.verified)verified.push(v);}
  else unverified.push('Conditional Formatting / LightUp checker not loaded');
- // Non-blocking notification based exclusively on the original DataTable floor-name support.
- // Service floor remains free text; no syntax/count validation and no automatic selection.
- const floorLedNames=[];
+ // Factory floor-name matrix: MR and MRL Version02 have separate source workbooks.
+ // The original TblK10_SFloor columns independently govern Segment LED, Dot LED,
+ // LCD, and voice guidance AAN-G. Do not infer AAN-G eligibility from the
+ // display technology or merge it with the unrelated AAN-B exclusion rule.
+ // Floor name is free text, and no flooring syntax/count restriction is added.
+ const floorLedNames=[],floorDotOnlyNames=[],floorDotOrLCDNames=[],aanGUnsupportedNames=[],matchedFloorRows=[];
  const ftable=db.tables?.TblK10_SFloor;
  const floorNameRef=db.names?.local?.SpecForm?.K10_SFloor;
  const floorCell=/SpecForm!\$?([A-Z]+)\$?(\d+)/.exec(floorNameRef||'');
- const serviceFloor=floorCell?value('SpecForm',floorCell[1]+floorCell[2]):{ok:false};
+ const floorInputCell=floorCell?floorCell[1]+floorCell[2]:'';
+ const serviceFloor=floorInputCell?value('SpecForm',floorInputCell):{ok:false};
  const fref=/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(ftable?.ref||'');
  if(ftable?.sheet==='DataTable'&&fref&&ftable.columns&&serviceFloor.ok){
   const columnNumber=letters=>[...letters].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);
-  const letters=num=>{let text='';while(num){num--;text=String.fromCharCode(65+num%26)+text;num=Math.floor(num/26)}return text;};
+  const letters=num=>{let out='';while(num){num--;out=String.fromCharCode(65+num%26)+out;num=Math.floor(num/26)}return out;};
   const baseCol=columnNumber(fref[1]);
-  const floorIx=ftable.columns.indexOf('FloorNameButton'),segmentIx=ftable.columns.indexOf('SegmentLED'),dotIx=ftable.columns.indexOf('DotLED');
+  const ix=Object.fromEntries(['FloorNameButton','AAN-G','SegmentLED','DotLED','LCD'].map(k=>[k,ftable.columns.indexOf(k)]));
   const input=String(serviceFloor.value??'');
-  if(floorIx>=0&&segmentIx>=0&&dotIx>=0&&input.trim()){
+  if(Object.values(ix).every(x=>x>=0)&&input.trim()){
    const escapeRe=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-   const already=new Set();
    for(let row=Number(fref[2])+1;row<=Number(fref[4]);row++){
-    const getCol=ix=>String(db.sheets.DataTable[letters(baseCol+ix)+row]??'').trim();
-    const floor=getCol(floorIx);
-    if(!floor||getCol(segmentIx).toUpperCase()!=='N'||getCol(dotIx).toUpperCase()!=='Y')continue;
-    // Match complete names in arbitrary text, never substrings of T10, P60, etc.
+    const col=k=>String(db.sheets.DataTable[letters(baseCol+ix[k])+row]??'').trim();
+    const floor=col('FloorNameButton');if(!floor)continue;
+    // Complete floor-name tokens: 'T1' must not match 'T10', or 'P6' match 'P60'.
     const re=new RegExp('(^|[^\\p{L}\\p{N}])'+escapeRe(floor)+'(?=$|[^\\p{L}\\p{N}])','iu');
-    if(re.test(input)&&!already.has(floor.toUpperCase())){already.add(floor.toUpperCase());floorLedNames.push(floor);}
+    if(!re.test(input))continue;
+    const segment=col('SegmentLED').toUpperCase(),dot=col('DotLED').toUpperCase(),lcd=col('LCD').toUpperCase(),voice=col('AAN-G').toUpperCase();
+    matchedFloorRows.push({name:floor,segment,dot,lcd,voice});
+    if(segment==='N'&&dot==='Y'){
+     floorLedNames.push(floor);
+     // LCD inherits all Dot LED characters, even if the source LCD cell is '-'.
+     floorDotOrLCDNames.push(floor);
+    }
+    if(voice==='N')aanGUnsupportedNames.push(floor);
    }
+   verified.push('TblK10_SFloor: SegmentLED / DotLED / LCD / AAN-G, '+(model==='MRL'?'NEXIEZ-MRL Version02':'NEXIEZ-MR'));
   }
+ }else if(!serviceFloor.ok){
+  unverified.push('Floor name '+(floorInputCell||'K10_SFloor')+': '+(serviceFloor.error||'source unavailable'));
+ }else unverified.push('TblK10_SFloor: source table unavailable');
+ // Any installed indicator must display the complete served-floor list, not
+ // merely the lobby floor where the hall panel is physically mounted.
+ // Do not count HBV (a plain hall-call button without a position indicator).
+ if(matchedFloorRows.length && window.SPEC_PANEL_DISPLAY_RULES){
+  const tech=window.SPEC_PANEL_DISPLAY_RULES;
+  for(const panel of tech.selected(model,cell=>{
+   const item=value('SpecForm',cell);
+   if(!item.ok){unverified.push('Display '+cell+': '+item.error);return '';}
+   return item.value;
+  })){
+   const mode=tech.classify(model,panel.kind,panel.code);
+   if(mode==='NONE')continue;
+   if(mode==='UNKNOWN'){
+    issue('FloorName!Display!'+panel.cell,panel.cell,
+     panel.label+' ('+panel.code+'): chưa xác định được Segment/Dot LED/LCD từ mã thiết bị. Không thể xác nhận khả năng hiển thị tên tầng. / Unknown display technology.');
+    continue;
+   }
+   const unsupported=matchedFloorRows.filter(row=>tech.incompatible(mode,row)).map(row=>row.name);
+   if(unsupported.length){
+    const label={SEGMENT:'Segment LED',DOT:'Dot LED',LCD:'LCD'}[mode];
+    issue('FloorName!Display!'+panel.cell,panel.cell,
+     panel.label+' '+panel.code+' ('+label+') không hiển thị được tên tầng: '+unsupported.join(', ')+'. Vui lòng chọn mã bảng hiển thị tương thích hoặc sửa Floor Name. / Incompatible floor characters.');
+   }else verified.push(panel.kind+' '+panel.code+' ('+mode+'): supports all configured floor names');
+  }
+ }else if(matchedFloorRows.length && !window.SPEC_PANEL_DISPLAY_RULES){
+  unverified.push('Missing required COP/PIV/PIH display compatibility validator');
+ }
+ if(aanGUnsupportedNames.length){
+  const aanGCell=featureByCode['aan-g'];
+  if(aanGCell){
+   const flag=value('SpecForm',aanGCell);
+   const on=flag.ok&&[1,true,'1','TRUE','V','✓'].includes(typeof flag.value==='string'?flag.value.trim().toUpperCase():flag.value);
+   if(!flag.ok)unverified.push('Feature AAN-G: '+flag.error);
+   else if(on)issue('FloorName!AAN-G',aanGCell,
+    'Tên tầng '+aanGUnsupportedNames.join(', ')+' không hỗ trợ AAN-G theo TblK10_SFloor. Vui lòng thay tên tầng hoặc bỏ chọn AAN-G. / Selected floor names do not support AAN-G voice guidance.');
+  }else unverified.push('Feature AAN-G: feature address missing from source database');
  }
  // Source SDE checks have priority over their derivative DSJ1 door-finish
  // warnings. MR: DataTable!AP12, MRL V02: SpecForm!B209 source formula.
@@ -625,6 +743,6 @@ window.SPEC_SOURCE_CHECK=function(model,changes,db){
  // No silent full PASS: errors in unknown cells make verification INCOMPLETE / BLOCKED.
  const unique=[];const seen=new Set();for(const issueItem of issues){const key=issueItem.id+'|'+issueItem.message;if(!seen.has(key)){unique.push(issueItem);seen.add(key)}}
  const status=unique.length?'FAIL':unverified.length?'INCOMPLETE':'PASS';
- return {status,pass:status==='PASS',errors:unique,warnings,dotLedFloorNames:floorLedNames,verified:[...new Set(verified)],unverified:[...new Set(unverified)],details,conditions:conditionCount,source:'Excel DataTable & SpecForm + legacy C# Step1 checks',excelConditionsPass:conditionCount.fail===0&&conditionCount.unknown===0,legacyVerified:!!legacy,legacyGaps:legacy?.unverified||[],calls:eng.callCount};
+ return {status,pass:status==='PASS',errors:unique,warnings,dotLedFloorNames:floorLedNames,dotOnlyFloorNames:floorDotOnlyNames,dotOrLCDFloorNames:floorDotOrLCDNames,aanGUnsupportedFloorNames:aanGUnsupportedNames,verified:[...new Set(verified)],unverified:[...new Set(unverified)],details,conditions:conditionCount,source:'Excel DataTable & SpecForm + legacy C# Step1 checks',excelConditionsPass:conditionCount.fail===0&&conditionCount.unknown===0,legacyVerified:!!legacy,legacyGaps:legacy?.unverified||[],calls:eng.callCount};
  function guessB209Cell(message){if(/SDE|door edge/i.test(message))return featureByCode['sde - one side']||'D46';if(/SUS304/.test(message))return 'D46';if(/OH\/PD|Pit /i.test(message))return 'D37';if(/SETS-L/.test(message))return featureByCode['sets-l']||'D17';if(/Observation/.test(message))return 'D14';if(/Additional inputs/.test(message))return 'D23';if(/COP/i.test(message))return 'D60';return '';}
 };

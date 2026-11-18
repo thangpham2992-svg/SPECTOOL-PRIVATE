@@ -2071,13 +2071,7 @@ function renderSourceCheck(result){
   top.className='check-top '+(failed?'fail':incomplete?'partial':'source-pass')}
  if(!wrap)return;
  wrap.replaceChildren();
- const addFloorLedWarning=()=>{
-  if(!Array.isArray(result.dotLedFloorNames)||result.dotLedFloorNames.length===0)return;
-  const notice=document.createElement('div');notice.className='check-led-warning';notice.setAttribute('role','note');
-  notice.textContent='Tồn tại tên tầng cần phải sử dụng bảng gọi Dotled';
-  notice.title='Tên tầng theo DataTable: '+result.dotLedFloorNames.join(', ');
-  wrap.append(notice);
- };
+
  if(!failed){
   // When the Version02 mass table is incomplete, show a direct link at D57
   // without pretending this is an incorrect user input.
@@ -2089,7 +2083,7 @@ function renderSourceCheck(result){
    const relatedToCop=(result.unverified||[]).some(x=>/Decoration Weight Maximum NEXIEZ-MRL Version2:.*không có nhánh tính khối lượng vách.*COP/i.test(String(x)));
    notice.onclick=()=>focusIssue(relatedToCop?'D61':'D57');wrap.append(notice);
   }
-  addFloorLedWarning();return;
+  return;
  }
  const aggregates=/^(?:DataTable!D512|DataTable!D527|SpecForm!B210|SpecForm!B206|SpecForm!B208)$/;
  const primaries=result.errors.filter(x=>!aggregates.test(x.id));
@@ -2121,13 +2115,13 @@ function renderSourceCheck(result){
   if(!name||name===cell)name='Thông số kỹ thuật';
   // NSCR-C/C760: explain required EVRC choice, instead of merely showing an
   // unlabeled failed NSCR-C row. Clicking the error opens Operation at EVRC-C.
-  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('NY40!')||String(err.id)==='Feature!HE-B-Dependencies'||String(err.id)==='Feature!MR_COP_OLHL_EXCLC'||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
+  const message=(isDimension(cell)||String(err.id)==='ALPHA!TwoStopsTravel'||String(err.id).startsWith('MRL_V02_DECOR!')||String(err.id).startsWith('NY40!')||String(err.id)==='FloorName!AAN-G'||String(err.id).startsWith('FloorName!Display!')||String(err.id)==='Feature!HE-B-Dependencies'||String(err.id)==='Feature!MR_COP_OLHL_EXCLC'||String(err.id).startsWith('JD!')||($('model').value==='MR'&&String(err.id)==='DataTable!D494'))?String(err.message||'').trim():'';
   const priority=isDimension(cell)?dimensionPriority(err):0;
   const old=fields.get(cell);
   if(!old||priority>old.priority)fields.set(cell,{name,message,priority});
  }
  if(top&&failed)top.textContent=`Không đạt — ${fields.size||1} lỗi`;
- if(!fields.size){const row=document.createElement('div');row.className='check-error-row';row.textContent='Có lỗi kỹ thuật cần kiểm tra';wrap.append(row);addFloorLedWarning();return}
+ if(!fields.size){const row=document.createElement('div');row.className='check-error-row';row.textContent='Có lỗi kỹ thuật cần kiểm tra';wrap.append(row);return}
  let index=0;
  for(const [cell,item] of fields){
   const link=document.createElement('button');link.type='button';link.className='check-error-row';
@@ -2142,7 +2136,6 @@ function renderSourceCheck(result){
   link.onclick=()=>focusIssue(cell);
   wrap.append(link);
  }
- addFloorLedWarning();
 }
 
 function download(bytes,name,type){
