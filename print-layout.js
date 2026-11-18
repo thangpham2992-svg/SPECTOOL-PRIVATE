@@ -111,7 +111,25 @@
    for(const entry of Array.from(cols?.children||[])){const min=Number(attr(entry,'min')),max=Number(attr(entry,'max')),width=Number(attr(entry,'width'));for(let i=1;i<=3;i++)if(i>=min&&i<=max&&width>0)widths[i-1]=width}
    const sum=widths.reduce((a,b)=>a+b,0);const colgroup=widths.map(w=>'<col style="width:'+(w/sum*100).toFixed(5)+'%">').join('');
    const first=Array.from(cells.entries()).find(([a])=>a==='B8')?.[1]?.value||'';
-   const project=esc(first);const modelName=model==='MR'?'NEXIEZ-MR':'NEXIEZ-MRL Version02';
+   const project=esc(first);const modelName=model==='MR'?'NEXIEZ-MR':'NEXIEZ-MRL Version2';
+   // Detect a bilingual pair from the real exported XLSX border styles across
+   // ALL sections. Section III may have a vertically merged label on the left,
+   // unlike Section V features where both lines carry their own labels.
+   // Section I/II/IV rows that already contain both languages in the SAME cell
+   // have no internal border; they retain a very light item separator.
+   const bilingualEnglish=new Set(),bilingualVietnamese=new Set();
+   for(let rn=1;rn<end;rn++){
+     if(model!=='MRL'||!visibleRows.has(rn)||!visibleRows.has(rn+1))continue;
+     const upper=cells.get('C'+rn),lower=cells.get('C'+(rn+1));
+     if(!upper?.value?.trim()||!lower?.value?.trim())continue;
+     const upperStyle=styles.xfs[upper.style],lowerStyle=styles.xfs[lower.style];
+     // Actual XLSX cell styles mark only the two lines of a single bilingual
+     // item (no lower edge on upper C; no upper edge on lower C).
+     if(!upperStyle?.border?.bottom&&!lowerStyle?.border?.top&&
+        upperStyle?.border?.top&&lowerStyle?.border?.bottom){
+       bilingualEnglish.add(rn);bilingualVietnamese.add(rn+1);
+     }
+   }
    const printRows=[];
    for(let rowNum=1;rowNum<=end;rowNum++){
      const row=visibleRows.get(rowNum);if(!row)continue;
@@ -133,7 +151,8 @@
      const minHeight=Math.max(isBlank?2:0,Math.min(72,rowHeight*1.07));
      const rowValue=[1,2,3].map(i=>String(cells.get(colAddr(i)+rowNum)?.value||'')).join(' ');
      const cl=(rowNum<13?' excel-prelude':'')+(isBlank?' excel-space':'')+(/^(?:I|II|III|IV|V|VI)\.\s|CÁC TÍNH NĂNG|CÁC TÍNH NĂNG|Các tính năng/i.test(rowValue.trim())?' excel-heading':'')+(/Các tính năng \(Features\)/i.test(rowValue)?' excel-features-title':'');
-     printRows.push('<tr class="excel-row'+cl+'" data-source-row="'+rowNum+'" style="height:'+minHeight.toFixed(1)+'px">'+rowCells.join('')+'</tr>');
+     const pairClass=bilingualEnglish.has(rowNum)?' excel-bilingual-en':bilingualVietnamese.has(rowNum)?' excel-bilingual-vi':'';
+     printRows.push('<tr class="excel-row'+cl+pairClass+'" data-source-row="'+rowNum+'" style="height:'+minHeight.toFixed(1)+'px">'+rowCells.join('')+'</tr>');
    }
    const iosPrintCSS=isIOS?`
    /* iOS-only: make native XLSX borders visible without inventing borders on unbordered cells. */
@@ -151,8 +170,14 @@
    table.excel{border-collapse:collapse;border-spacing:0;table-layout:fixed;width:100%;font-size:8.2pt;line-height:1.18}
    table.excel td{padding:3px 4px;vertical-align:middle;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:1.23;min-width:0}
    main.mrl-export table.excel tr[data-source-row] td{border:0}
-   main.mrl-export table.excel tr[data-source-row]:not(.excel-prelude):not(.excel-space) td{border:0.7px solid #9caaba}
+   main.mrl-export table.excel tr[data-source-row]:not(.excel-prelude):not(.excel-space) td{border:0.45px solid #d1dbe5}
    main.mrl-export table.excel tr.excel-heading td{border-color:#a7b9c8}
+   /* One bilingual item = one visual group across all specification sections.
+      Preserve the outer bottom border of a rowspan cell spanning both lines. */
+   main.mrl-export table.excel tr.excel-bilingual-en td:not([rowspan]){border-bottom:0!important}
+   main.mrl-export table.excel tr.excel-bilingual-vi td{border-top:0!important}
+   table.excel tr.excel-bilingual-en{break-after:avoid;page-break-after:avoid}
+   table.excel tr.excel-bilingual-vi{break-before:avoid;page-break-before:avoid}
    main.mrl-export table.excel tr[data-source-row] td[data-cell^="A1"],main.mrl-export table.excel tr[data-source-row] td[data-cell^="A2"]{border:0}
    /* MRL entrance is a single logical device/floor section: start it on a new
       page to prevent a top-floor row being orphaned from main/other floors. */
